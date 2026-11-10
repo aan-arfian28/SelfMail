@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: selfmail
+      POSTGRES_PASSWORD: selfmail
+      POSTGRES_DB: selfmail
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U selfmail"]
+      interval: 5s
+      retries: 10
+
+  stalwart:
+    image: stalwartlabs/stalwart:latest
+    ports: ["25:25", "587:587", "465:465", "993:993", "143:143", "8081:8080"]
+    volumes: [stalwart:/opt/stalwart]
+
+  selfmail:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://selfmail:selfmail@postgres:5432/selfmail?sslmode=disable
+      STALWART_URL: http://stalwart:8080
+    ports: ["8080:8080"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      stalwart: {condition: service_started}
+
+volumes:
+  pgdata:
+  stalwart:
