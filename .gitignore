@@ -1,0 +1,27 @@
+# Secrets / local config
+.env
+.env.*
+!.env.example
+
+# Build output
+/selfmail
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Go
+/vendor/
+coverage.txt
+coverage.html
+
+# Tooling
+graphify-out/
+.claude/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
