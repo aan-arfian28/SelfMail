@@ -4,7 +4,6 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -204,18 +203,4 @@ func (s *Service) DNSRecords(ctx context.Context, d *store.Domain) ([]RecordView
 		return nil, err
 	}
 	return s.storedRecords(ctx, d)
-}
-
-func (s *Service) pushStalwartSettings(ctx context.Context) error {
-	return s.SW.ApplySettings(ctx, map[string]string{
-		"spam-filter.score.junk":        fmt.Sprint(s.Cfg.JunkThreshold),
-		"spam-filter.score.reject":      fmt.Sprint(s.Cfg.RejectThreshold),
-		"session.data.max-message-size": fmt.Sprint(s.Cfg.MaxMessageSize),
-		"queue.schedule.expire":         s.Cfg.OutboundMaxAge.String(),
-	})
-}
-
-// ApplyStalwartSettings pushes runtime thresholds/limits to Stalwart (FR-06, FR-22).
-func (s *Service) ApplyStalwartSettings(ctx context.Context) error {
-	return s.pushStalwartSettings(ctx)
 }

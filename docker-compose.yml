@@ -13,8 +13,11 @@ services:
 
   stalwart:
     image: stalwartlabs/stalwart:latest
+    # Fresh install starts in bootstrap mode; run scripts/bootstrap-stalwart.sh once, then restart.
+    environment:
+      STALWART_RECOVERY_ADMIN: ${STALWART_RECOVERY_ADMIN:-admin:change-me-now}
     ports: ["25:25", "587:587", "465:465", "993:993", "143:143", "8081:8080"]
-    volumes: [stalwart:/opt/stalwart]
+    volumes: [stalwart:/var/lib/stalwart]
 
   selfmail:
     build: .

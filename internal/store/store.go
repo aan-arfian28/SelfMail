@@ -93,9 +93,9 @@ func (s *Store) ListDomains(ctx context.Context) ([]*Domain, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) SetDomainStalwart(ctx context.Context, id, stalwartID, encPriv, pub string) error {
-	_, err := s.P.Exec(ctx, `UPDATE domains SET stalwart_domain_id=$2,dkim_private_key=NULLIF($3,''),dkim_public_key=NULLIF($4,''),updated_at=now() WHERE id=$1`,
-		id, stalwartID, encPriv, pub)
+func (s *Store) SetDomainStalwart(ctx context.Context, id, stalwartID, selector, pub string) error {
+	_, err := s.P.Exec(ctx, `UPDATE domains SET stalwart_domain_id=$2,dkim_selector=$3,dkim_public_key=NULLIF($4,''),updated_at=now() WHERE id=$1`,
+		id, stalwartID, selector, pub)
 	return err
 }
 

@@ -81,13 +81,6 @@ func run(log *slog.Logger) error {
 		log.Warn("CLOUDFLARE_API_TOKEN not set: DNS records must be created manually (GET /domains/{name}/dns-records)")
 	}
 
-	// Push thresholds/limits to Stalwart; best-effort so the API can still start.
-	sctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	if err := svc.ApplyStalwartSettings(sctx); err != nil {
-		log.Warn("could not apply settings to Stalwart (will not retry automatically)", "err", err)
-	}
-	cancel()
-
 	if cfg.RunWorker {
 		go worker.New(svc, st, cfg, log).Run(ctx)
 	}

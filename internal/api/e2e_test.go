@@ -69,10 +69,10 @@ func (f *fakeSW) DeleteDomain(_ context.Context, n string) error {
 	delete(f.domains, n)
 	return nil
 }
-func (f *fakeSW) EnsureDKIM(_ context.Context, d, sel string) (string, error) {
+func (f *fakeSW) DomainDKIM(_ context.Context, d string) (string, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return "PUBKEY" + d, f.chk()
+	return "sel1", "PUBKEY" + d, f.chk()
 }
 func (f *fakeSW) CreateMailbox(_ context.Context, a, pw string, q int64) (string, error) {
 	f.mu.Lock()
@@ -82,12 +82,6 @@ func (f *fakeSW) CreateMailbox(_ context.Context, a, pw string, q int64) (string
 	}
 	f.mailboxes[a], f.quotas[a], f.passwords[a] = 0, q, pw
 	return a, nil
-}
-func (f *fakeSW) MailboxExists(_ context.Context, a string) (bool, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	_, ok := f.mailboxes[a]
-	return ok, f.chk()
 }
 func (f *fakeSW) SetQuota(_ context.Context, a string, q int64) error {
 	f.mu.Lock()
@@ -130,8 +124,6 @@ func (f *fakeSW) DeleteForwarder(_ context.Context, a string) error {
 	delete(f.fwd, a)
 	return f.chk()
 }
-func (f *fakeSW) Learn(context.Context, string, []byte) error            { return nil }
-func (f *fakeSW) ApplySettings(context.Context, map[string]string) error { return nil }
 
 type fakeDNS struct {
 	mu  sync.Mutex
@@ -293,7 +285,7 @@ func (e *env) publishDNS(domain string) {
 	defer e.dns.mu.Unlock()
 	e.dns.mx[domain] = []*net.MX{{Host: "mail.example.com.", Pref: 10}}
 	e.dns.txt[domain] = []string{"v=spf1 ip4:203.0.113.5 -all"}
-	e.dns.txt["default._domainkey."+domain] = []string{"v=DKIM1; k=rsa; p=PUBKEY" + domain}
+	e.dns.txt["sel1._domainkey."+domain] = []string{"v=DKIM1; k=rsa; p=PUBKEY" + domain}
 	e.dns.txt["_dmarc."+domain] = []string{"v=DMARC1; p=quarantine"}
 }
 
@@ -684,4 +676,7 @@ func TestAuditAndHealthAndAutoconfig(t *testing.T) {
 
 type testLogWriter struct{ t *testing.T }
 
-func (w testLogWriter) Write(p []byte) (int, error) { w.t.Log(strings.TrimSpace(string(p))); return len(p), nil }
+func (w testLogWriter) Write(p []byte) (int, error) {
+	w.t.Log(strings.TrimSpace(string(p)))
+	return len(p), nil
+}

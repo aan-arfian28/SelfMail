@@ -63,12 +63,12 @@ func (s *Service) CreateDomain(ctx context.Context, name string, catchAll bool) 
 		rollback()
 		return nil, wrap(err, "stalwart domain")
 	}
-	pub, err := s.SW.EnsureDKIM(ctx, ascii, d.DKIMSelector)
+	selector, pub, err := s.SW.DomainDKIM(ctx, ascii)
 	if err != nil {
 		// Domain exists in Stalwart but DKIM failed: leave the row; reconcile completes it.
 		return nil, wrap(err, "stalwart dkim")
 	}
-	if err := s.Store.SetDomainStalwart(ctx, d.ID, id, "", pub); err != nil {
+	if err := s.Store.SetDomainStalwart(ctx, d.ID, id, selector, pub); err != nil {
 		return nil, err
 	}
 	d, _ = s.Store.GetDomainByID(ctx, d.ID)

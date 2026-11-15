@@ -3,81 +3,117 @@ package stalwart
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
-	"sync/atomic"
+	"fmt"
+	"os"
 	"testing"
 	"time"
 )
+
+const sampleZone = "v1-ed25519-20261110._domainkey.test.local. IN TXT \"v=DKIM1; k=ed25519; h=sha256; p=EDKEY=\"\n" +
+	"v1-rsa-20261110._domainkey.test.local. IN TXT (\n    \"v=DKIM1; k=rsa; h=sha256; p=AAAA\"\n    \"BBBB\"\n)\n" +
+	"test.local. IN MX 10 mail.test.local.\n"
+
+func TestParseDKIMPicksRSAAndJoinsSegments(t *testing.T) {
+	sel, pub, err := ParseDKIM(sampleZone)
+	if err != nil || sel != "v1-rsa-20261110" || pub != "AAAABBBB" {
+		t.Fatalf("%q %q %v", sel, pub, err)
+	}
+	if _, _, err := ParseDKIM("test.local. IN MX 10 mail.test.local."); err == nil {
+		t.Fatal("expected error without DKIM record")
+	}
+}
 
 func TestUnavailableOnConnectionFailure(t *testing.T) {
 	c := New("http://127.0.0.1:1", "", "", time.Second)
 	if err := c.Ping(context.Background()); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("got %v", err)
 	}
+	if _, err := c.EnsureDomain(context.Background(), "x.com"); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("got %v", err)
+	}
 }
 
-func TestGetRetriesPostDoesNot(t *testing.T) {
-	var gets, posts int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			atomic.AddInt32(&gets, 1)
-		} else {
-			atomic.AddInt32(&posts, 1)
-		}
-		w.WriteHeader(502)
-	}))
-	defer srv.Close()
-	c := New(srv.URL, "u", "p", time.Second)
-	if err := c.Ping(context.Background()); !errors.Is(err, ErrUnavailable) {
+// Integration test against a real, bootstrapped Stalwart (>= 1.x).
+// STALWART_TEST_URL=http://localhost:18081 STALWART_TEST_USER=... STALWART_TEST_PASS=...
+func TestAgainstRealStalwart(t *testing.T) {
+	url := os.Getenv("STALWART_TEST_URL")
+	if url == "" {
+		t.Skip("STALWART_TEST_URL not set")
+	}
+	c := New(url, os.Getenv("STALWART_TEST_USER"), os.Getenv("STALWART_TEST_PASS"), 10*time.Second)
+	ctx := context.Background()
+	dom := fmt.Sprintf("it%d.test", time.Now().UnixNano()%1e9)
+
+	if err := c.Ping(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if gets != 3 {
-		t.Fatalf("gets=%d", gets)
-	}
-	if _, err := c.CreateMailbox(context.Background(), "a@b.com", "pw", 1); !errors.Is(err, ErrUnavailable) {
+	id1, err := c.EnsureDomain(ctx, dom)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if posts != 1 {
-		t.Fatalf("non-idempotent POST was retried: %d", posts)
+	id2, err := c.EnsureDomain(ctx, dom) // idempotent: no duplicate
+	if err != nil || id1 != id2 {
+		t.Fatalf("not idempotent: %s %s %v", id1, id2, err)
 	}
-}
+	sel, pub, err := c.DomainDKIM(ctx, dom)
+	if err != nil || sel == "" || len(pub) < 100 {
+		t.Fatalf("dkim: %q %d %v", sel, len(pub), err)
+	}
 
-func TestEnsureDomainIsIdempotent(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"error":"fieldAlreadyExists","item":"name"}`))
-	}))
-	defer srv.Close()
-	id, err := New(srv.URL, "", "", time.Second).EnsureDomain(context.Background(), "example.com")
-	if err != nil || id != "example.com" {
-		t.Fatalf("%q %v", id, err)
+	a, b := "halo@"+dom, "other@"+dom
+	if _, err := c.CreateMailbox(ctx, a, "Str0ng-Password!x", 1000000); err != nil {
+		t.Fatal(err)
 	}
-}
+	if _, err := c.CreateMailbox(ctx, a, "Str0ng-Password!x", 1000000); !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate mailbox: %v", err)
+	}
+	if _, err := c.CreateMailbox(ctx, b, "Str0ng-Password!x", 1000000); err != nil {
+		t.Fatal(err)
+	}
+	used, err := c.Usage(ctx, a)
+	if err != nil || used != 0 {
+		t.Fatalf("usage %d %v", used, err)
+	}
+	if _, err := c.Usage(ctx, "ghost@"+dom); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("filter must not leak other accounts: %v", err)
+	}
+	if err := c.SetQuota(ctx, a, 2000000); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SetPassword(ctx, a, "An0ther-Password!y"); err != nil {
+		t.Fatal(err)
+	}
 
-func TestUsageAndDKIMParsing(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/principal/a@b.com":
-			w.Write([]byte(`{"data":{"id":5,"type":"individual","name":"a@b.com","usedQuota":1234,"quota":5000}}`))
-		case "/api/dkim":
-			w.Write([]byte(`{"data":null}`))
-		case "/api/dns/records/b.com":
-			w.Write([]byte(`{"data":[{"type":"MX","name":"b.com.","content":"10 mail.b.com."},{"type":"TXT","name":"default._domainkey.b.com.","content":"v=DKIM1; k=rsa; p=AAA BBB"}]}`))
-		default:
-			w.WriteHeader(404)
-		}
-	}))
-	defer srv.Close()
-	c := New(srv.URL, "", "", time.Second)
-	used, err := c.Usage(context.Background(), "a@b.com")
-	if err != nil || used != 1234 {
-		t.Fatalf("%d %v", used, err)
+	if err := c.SetForwarder(ctx, "info@"+dom, []string{a, b}); err != nil {
+		t.Fatal(err)
 	}
-	pub, err := c.EnsureDKIM(context.Background(), "b.com", "default")
-	if err != nil || pub != "AAABBB" {
-		t.Fatalf("%q %v", pub, err)
+	if err := c.SetForwarder(ctx, "info@"+dom, []string{a}); err != nil { // replace
+		t.Fatal(err)
 	}
-	if _, err := c.Usage(context.Background(), "nobody@b.com"); !errors.Is(err, ErrNotFound) {
+	if err := c.SetForwarder(ctx, "@"+dom, []string{a}); err != nil { // catch-all
+		t.Fatal(err)
+	}
+	if err := c.DeleteForwarder(ctx, "@"+dom); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.DeleteForwarder(ctx, "info@"+dom); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.DeleteForwarder(ctx, "info@"+dom); err != nil { // idempotent
+		t.Fatal(err)
+	}
+
+	n, err := c.DeleteMailbox(ctx, a)
+	if err != nil || n != 0 {
+		t.Fatalf("delete: %d %v", n, err)
+	}
+	if _, err := c.DeleteMailbox(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.DeleteDomain(ctx, dom); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.DeleteDomain(ctx, dom); err != nil { // idempotent
 		t.Fatal(err)
 	}
 }

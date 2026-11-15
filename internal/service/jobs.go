@@ -178,12 +178,12 @@ func (s *Service) Reconcile(ctx context.Context) error {
 			note(err)
 			continue
 		}
-		pub, err := s.SW.EnsureDKIM(ctx, d.Punycode, d.DKIMSelector)
+		selector, pub, err := s.SW.DomainDKIM(ctx, d.Punycode)
 		if err != nil {
 			note(err)
 			continue
 		}
-		if err := s.Store.SetDomainStalwart(ctx, d.ID, id, "", pub); err != nil {
+		if err := s.Store.SetDomainStalwart(ctx, d.ID, id, selector, pub); err != nil {
 			note(err)
 			continue
 		}
